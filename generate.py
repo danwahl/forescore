@@ -2,75 +2,54 @@
 """
 Generate FSM traversal datasets for training language models.
 
-This script generates random finite state machines in DOT notation along with
-input sequences and their corresponding final states.
+This script generates random finite state machines using AALpy library
+along with input sequences and their corresponding final states.
 """
 
 import argparse
 import random
-import json
+import tempfile
+import os
 from pathlib import Path
-from typing import Dict, List, Tuple, Set
+from typing import List, Tuple
 from datasets import Dataset
+from aalpy.utils import generate_random_dfa
 
 
-def generate_fsm(num_states: int, alphabet: List[str], transition_density: float = 0.7) -> Dict:
+def generate_fsm(num_states: int, alphabet: List[str]):
     """
-    Generate a random FSM with specified number of states.
+    Generate a random FSM with specified number of states using AALpy.
 
     Args:
         num_states: Number of states in the FSM
         alphabet: List of input symbols
-        transition_density: Probability of having a transition for each (state, symbol) pair
 
     Returns:
-        Dictionary containing FSM structure with transitions
+        AALpy DFA object
     """
-    states = [f"S{i}" for i in range(num_states)]
-    transitions = {}
-
-    # Build transition table
-    for state in states:
-        transitions[state] = {}
-        for symbol in alphabet:
-            # With some probability, create a transition
-            if random.random() < transition_density:
-                next_state = random.choice(states)
-                transitions[state][symbol] = next_state
-
-    # Ensure the FSM is connected - make sure every state is reachable from S0
-    # Do a simple fix: ensure at least one incoming transition to each state
-    for i, state in enumerate(states[1:], start=1):  # Skip S0 as it's the start state
-        # Check if this state is reachable
-        reachable = False
-        for src_state in states:
-            for symbol in alphabet:
-                if transitions[src_state].get(symbol) == state:
-                    reachable = True
-                    break
-            if reachable:
-                break
-
-        # If not reachable, add a random transition to it
-        if not reachable:
-            src_state = random.choice(states[:i])  # Pick from already processed states
-            symbol = random.choice(alphabet)
-            transitions[src_state][symbol] = state
-
-    return {
-        "states": states,
-        "alphabet": alphabet,
-        "transitions": transitions,
-        "initial_state": "S0"
-    }
+    # AALpy guarantees all states are reachable when compute_prefixes=True
+    # We set num_accepting_states to 1 (AALpy requires at least 1)
+    # but we ignore accepting states in our traversal problems
+    dfa = generate_random_dfa(
+        alphabet=alphabet,
+        num_states=num_states,
+        num_accepting_states=1,
+        compute_prefixes=True  # Ensures all states are reachable
+    )
+    return dfa
 
 
-def fsm_to_dot(fsm: Dict) -> str:
+def fsm_to_dot(dfa) -> str:
     """
-    Convert FSM to Graphviz DOT notation.
+    Convert AALpy DFA to simplified DOT notation for traversal problems.
+
+    We simplify AALpy's DOT format by:
+    - Using "Start" instead of "__start0" for the initial state marker
+    - Removing accepting state annotations (doublecircle) since we only care about traversal
+    - Using consistent state naming
 
     Args:
-        fsm: FSM dictionary
+        dfa: AALpy DFA object
 
     Returns:
         DOT notation string
@@ -79,15 +58,15 @@ def fsm_to_dot(fsm: Dict) -> str:
 
     # Initial state marker
     lines.append("  Start [shape=point];")
-    lines.append(f"  Start -> {fsm['initial_state']};")
+    lines.append(f"  Start -> {dfa.initial_state.state_id};")
     lines.append("")
 
     # Transitions
     # Group transitions by (src, dst) pair to combine labels
     edge_labels = {}
-    for src_state, transitions in fsm["transitions"].items():
-        for symbol, dst_state in transitions.items():
-            key = (src_state, dst_state)
+    for state in dfa.states:
+        for symbol, next_state in state.transitions.items():
+            key = (state.state_id, next_state.state_id)
             if key not in edge_labels:
                 edge_labels[key] = []
             edge_labels[key].append(symbol)
@@ -101,53 +80,55 @@ def fsm_to_dot(fsm: Dict) -> str:
     return "\n".join(lines)
 
 
-def simulate_fsm(fsm: Dict, sequence: List[str]) -> Tuple[str, List[str]]:
+def simulate_fsm(dfa, sequence: List[str]) -> Tuple[str, List[str]]:
     """
     Simulate FSM on an input sequence.
 
     Args:
-        fsm: FSM dictionary
+        dfa: AALpy DFA object
         sequence: List of input symbols
 
     Returns:
         Tuple of (final_state, trace) where trace is list of states visited
     """
-    current_state = fsm["initial_state"]
-    trace = [current_state]
+    current_state = dfa.initial_state
+    trace = [current_state.state_id]
 
     for symbol in sequence:
-        if symbol not in fsm["transitions"][current_state]:
-            # No transition defined - stay in current state (or could raise error)
-            # For robustness, let's stay in current state
+        if symbol not in current_state.transitions:
+            # No transition defined - stay in current state
+            # This shouldn't happen with AALpy DFAs since they're complete,
+            # but we handle it for robustness
             pass
         else:
-            current_state = fsm["transitions"][current_state][symbol]
-        trace.append(current_state)
+            current_state = current_state.transitions[symbol]
+        trace.append(current_state.state_id)
 
-    return current_state, trace
+    return current_state.state_id, trace
 
 
-def generate_sequence(fsm: Dict, length: int) -> List[str]:
+def generate_sequence(dfa, length: int) -> List[str]:
     """
     Generate a random input sequence that is valid for the FSM.
 
     Args:
-        fsm: FSM dictionary
+        dfa: AALpy DFA object
         length: Length of sequence to generate
 
     Returns:
         List of input symbols
     """
     sequence = []
-    current_state = fsm["initial_state"]
+    current_state = dfa.initial_state
+    alphabet = dfa.get_input_alphabet()
 
     for _ in range(length):
         # Get available transitions from current state
-        available_symbols = list(fsm["transitions"][current_state].keys())
+        available_symbols = list(current_state.transitions.keys())
 
         if not available_symbols:
             # No outgoing transitions - just pick random symbol from alphabet
-            symbol = random.choice(fsm["alphabet"])
+            symbol = random.choice(alphabet)
         else:
             # Pick a random available transition
             symbol = random.choice(available_symbols)
@@ -155,24 +136,24 @@ def generate_sequence(fsm: Dict, length: int) -> List[str]:
         sequence.append(symbol)
 
         # Update current state
-        if symbol in fsm["transitions"][current_state]:
-            current_state = fsm["transitions"][current_state][symbol]
+        if symbol in current_state.transitions:
+            current_state = current_state.transitions[symbol]
 
     return sequence
 
 
-def format_problem(fsm: Dict, sequence: List[str]) -> str:
+def format_problem(dfa, sequence: List[str]) -> str:
     """
     Format the FSM and sequence as a problem statement.
 
     Args:
-        fsm: FSM dictionary
+        dfa: AALpy DFA object
         sequence: Input sequence
 
     Returns:
         Formatted problem string
     """
-    dot = fsm_to_dot(fsm)
+    dot = fsm_to_dot(dfa)
     sequence_str = ", ".join(sequence)
 
     problem = f"""{dot}
@@ -214,17 +195,17 @@ def generate_dataset(
         num_states = random.randint(*num_states_range)
         seq_length = random.randint(*sequence_length_range)
 
-        # Generate FSM
-        fsm = generate_fsm(num_states, alphabet)
+        # Generate FSM using AALpy
+        dfa = generate_fsm(num_states, alphabet)
 
         # Generate sequence
-        sequence = generate_sequence(fsm, seq_length)
+        sequence = generate_sequence(dfa, seq_length)
 
         # Simulate to get answer
-        final_state, trace = simulate_fsm(fsm, sequence)
+        final_state, trace = simulate_fsm(dfa, sequence)
 
         # Format problem
-        problem = format_problem(fsm, sequence)
+        problem = format_problem(dfa, sequence)
 
         # Create example
         example = {

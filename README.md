@@ -11,6 +11,14 @@ Can LLMs think while you recite the Gettysburg Address?
 5. `export PATH=/usr/local/cuda-12.1/bin:$PATH`
 6. `MAX_JOBS=8 pip install flash-attn==2.7.4.post1 --no-build-isolation'
 
+## Generate dataset
+
+`python generate.py --num-examples 10000`
+
+## Test
+
+`python -m unittest discover tests/`
+
 ## Train
 
 `bash slurm/launch.sh slurm/train.slurm`

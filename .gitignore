@@ -8,8 +8,8 @@ __pycache__/
 # Generated datasets
 data/
 
-# Test files
-test_*.py
+# Test files in root directory only
+/test_*.py
 
 # Training outputs
 forescore/
