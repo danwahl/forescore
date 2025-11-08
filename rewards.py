@@ -19,14 +19,8 @@ def parse_full_response(text: str) -> dict:
 
         result = {
             "think": think_elem.text if think_elem is not None else None,
-            "final_state": None,
+            "answer": answer_elem.text.strip() if answer_elem is not None and answer_elem.text and answer_elem.text.strip() else None,
         }
-
-        if answer_elem is not None:
-            # For FSM task, we just need the final state
-            # The answer could be just text or wrapped in a tag
-            if answer_elem.text and answer_elem.text.strip():
-                result["final_state"] = answer_elem.text.strip()
 
         return result
     except:
@@ -46,7 +40,7 @@ def format_reward_func(completions, **kwargs) -> list[float]:
             try:
                 # Check if we have both think and answer
                 has_think = parsed["think"] is not None and len(parsed["think"].strip()) > 0
-                has_answer = parsed["final_state"] is not None
+                has_answer = parsed["answer"] is not None
                 results.append(1.0 if has_think and has_answer else 0.0)
             except:
                 results.append(0.0)
@@ -63,12 +57,12 @@ def final_state_correct_reward_func(
 
     for response, target_state in zip(responses, final_state):
         parsed = parse_full_response(response)
-        if parsed is None or parsed["final_state"] is None:
+        if parsed is None or parsed["answer"] is None:
             results.append(0.0)
         else:
             try:
                 # Exact match for final state
-                predicted_state = parsed["final_state"].strip()
+                predicted_state = parsed["answer"]
                 results.append(1.0 if predicted_state == target_state else 0.0)
             except Exception:
                 results.append(0.0)

@@ -31,7 +31,7 @@ class TestParseFullResponse(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result["think"], "Starting at s1, applying a...")
-        self.assertEqual(result["final_state"], "s3")
+        self.assertEqual(result["answer"], "s3")
 
     def test_multiline_think(self):
         """Test parsing response with multiline think block."""
@@ -44,7 +44,7 @@ class TestParseFullResponse(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertIn("Step 1", result["think"])
-        self.assertEqual(result["final_state"], "s2")
+        self.assertEqual(result["answer"], "s2")
 
     def test_whitespace_handling(self):
         """Test parsing with extra whitespace."""
@@ -53,7 +53,7 @@ class TestParseFullResponse(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result["think"], "  thought  ")
-        self.assertEqual(result["final_state"], "s1")
+        self.assertEqual(result["answer"], "s1")
 
     def test_with_padding_tokens(self):
         """Test parsing with padding tokens."""
@@ -62,7 +62,7 @@ class TestParseFullResponse(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result["think"], "reasoning")
-        self.assertEqual(result["final_state"], "s5")
+        self.assertEqual(result["answer"], "s5")
 
     def test_missing_think(self):
         """Test response with missing think block."""
@@ -71,7 +71,7 @@ class TestParseFullResponse(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertIsNone(result["think"])
-        self.assertEqual(result["final_state"], "s2")
+        self.assertEqual(result["answer"], "s2")
 
     def test_missing_answer(self):
         """Test response with missing answer block."""
@@ -80,7 +80,7 @@ class TestParseFullResponse(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result["think"], "some reasoning")
-        self.assertIsNone(result["final_state"])
+        self.assertIsNone(result["answer"])
 
     def test_empty_think(self):
         """Test response with empty think block."""
@@ -89,7 +89,7 @@ class TestParseFullResponse(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertIsNone(result["think"])
-        self.assertEqual(result["final_state"], "s1")
+        self.assertEqual(result["answer"], "s1")
 
     def test_empty_answer(self):
         """Test response with empty answer block."""
@@ -98,7 +98,7 @@ class TestParseFullResponse(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result["think"], "thought")
-        self.assertIsNone(result["final_state"])
+        self.assertIsNone(result["answer"])
 
     def test_whitespace_only_think(self):
         """Test response with whitespace-only think block."""
@@ -107,7 +107,7 @@ class TestParseFullResponse(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertIsNotNone(result["think"])
-        self.assertEqual(result["final_state"], "s3")
+        self.assertEqual(result["answer"], "s3")
 
     def test_malformed_xml(self):
         """Test malformed XML returns None."""
@@ -123,7 +123,7 @@ class TestParseFullResponse(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertIsNone(result["think"])
-        self.assertIsNone(result["final_state"])
+        self.assertIsNone(result["answer"])
 
     def test_wrong_tags(self):
         """Test response with wrong tag names."""
@@ -132,7 +132,7 @@ class TestParseFullResponse(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertIsNone(result["think"])
-        self.assertIsNone(result["final_state"])
+        self.assertIsNone(result["answer"])
 
     def test_nested_tags(self):
         """Test response with nested tags."""
@@ -141,7 +141,7 @@ class TestParseFullResponse(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertIn("outer", result["think"])
-        self.assertEqual(result["final_state"], "s2")
+        self.assertEqual(result["answer"], "s2")
 
 
 class TestFormatRewardFunc(unittest.TestCase):
