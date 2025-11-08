@@ -1,0 +1,10 @@
+accelerate
+black
+chess
+lighteval
+jupyter
+more-itertools
+peft
+timm
+trl[vllm] @ git+https://github.com/huggingface/trl@v0.18.1
+wandb
