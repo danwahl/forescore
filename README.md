@@ -4,7 +4,7 @@ Can LLMs think while you recite the Gettysburg Address?
 
 ## Setup
 
-1. `srun -p general --constraint=a100 --gres=gpu:1 --cpus-per-task=32 --pty --mem 64G -t 270:00 /bin/bash`
+1. `srun -p general --constraint=a100 --gres=gpu:2 --cpus-per-task=32 --pty --mem 64G -t 270:00 /bin/bash`
 2. `conda create -n forscore python=3.12 -y`
 3. `conda activate forscore`
 4. `pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu121`

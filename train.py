@@ -13,7 +13,6 @@ from peft import LoraConfig
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    Gemma3ForConditionalGeneration,
 )
 from transformers.trainer_utils import get_last_checkpoint
 from trl import GRPOConfig, GRPOTrainer, ModelConfig, TrlParser
@@ -121,35 +120,6 @@ Your response MUST follow this XML format:
 Be thorough in your thinking process, showing each state transition clearly.
 """
     )
-
-
-# Your entire response MUST be in the exact XML format below:
-# <think>
-# [...thinking process here...]
-# </think>
-# <answer>
-# <turn>...</turn>
-# <piece_count>...</piece_count>
-# <white_king>...</white_king>
-# <best_move>...</best_move>
-# <centipawn>...</centipawn>
-# <analysis>
-# ...
-# </analysis>
-# </answer>
-
-# In your thinking process:
-# - Look at the board and assess the material balance, identifying which side has more pieces and their types
-# - Analyze the position for tactical and strategic elements, such as piece activity, king safety, pawn structure, and control of key squares
-# - Consider candidate moves and explain why certain moves are better than others
-# - Evaluate the current position in centipawns (100 cp = 1 pawn advantage, positive favors white, negative favors black)
-
-# Then provide:
-# 1. Which side is to move (white or black)
-# 2. The total number of pieces on the board
-# 3. The location of the white king (in UCI notation, e.g., e1, g1)
-# 4. The best move in the position (in UCI notation, e.g., e2e4, g8f6)
-# 5. Your centipawn evaluation
 
 
 def make_conv_for_grpo(example, system_prompt):
