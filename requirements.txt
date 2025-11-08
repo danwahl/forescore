@@ -1,6 +1,6 @@
 accelerate
 black
-chess
+datasets
 lighteval
 jupyter
 more-itertools

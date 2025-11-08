@@ -1,4 +1,3 @@
-import chess
 import datasets
 import logging
 import os
@@ -8,7 +7,7 @@ import torch
 import transformers
 
 from dataclasses import dataclass, field
-from datasets import load_dataset, Dataset
+from datasets import Dataset
 from datetime import datetime
 from peft import LoraConfig
 from transformers import (
@@ -22,13 +21,7 @@ from trl import GRPOConfig, GRPOTrainer, ModelConfig, TrlParser
 from rewards import (
     PAD_TOKEN,
     format_reward_func,
-    centipawn_int_reward_func,
-    centipawn_accuracy_reward_func,
-    turn_reward_func,
-    best_move_legal_reward_func,
-    best_move_correct_reward_func,
-    piece_count_reward_func,
-    white_king_location_reward_func,
+    final_state_correct_reward_func,
     token_count_reward_func,
 )
 
@@ -59,53 +52,73 @@ class PTConfig:
     {{- '<|im_start|>assistant\n' -}}
 {%- endif -%}"""
     )
-    dataset_name: str = field(default="Lichess/chess-position-evaluations")
+    dataset_name: str = field(default="./data/fsm_s3-10_l5-20_n10000")
     dataset_subset: str = field(default=None)
     name: str = field(
         default="forscore",
     )
     system_prompt: str = field(
-        default="""You are a helpful chess assistant. When given a FEN, think carefully about the position, then provide the following information:
+        default="""You are an expert at simulating finite state machines (FSMs). When given an FSM definition in DOT notation and a sequence of inputs, you need to determine the final state after processing the entire sequence.
 
-1. Whose turn it is to move (White or Black)
-2. The total number of pieces on the board
-3. The location of the White king (e.g. e1, g1)
-4. The best move in the position (in UCI notation, e.g, e2e4, g8f6)
-5. A centipawn evaluation (100 cp = 1 pawn advantage, positive for White advantage, negative for Black advantage)
-6. A one-sentence analysis of the position, to be displayed to the user
+Think through the problem step-by-step:
+1. Identify the initial state (marked by Start arrow)
+2. Process each input symbol one at a time
+3. Follow the transitions according to the FSM's edge labels
+4. Track your current state after each transition
 
-Here's an example response showing the required XML format:
+Here's an example showing the input format and required response:
+
+Input:
+digraph FSM {
+  rankdir=LR;
+  node [shape=circle];
+
+  Start [shape=point];
+  Start -> S0;
+
+  S0 -> S1 [label="a"];
+  S0 -> S2 [label="b"];
+  S1 -> S0 [label="a"];
+  S1 -> S3 [label="b"];
+  S2 -> S3 [label="a"];
+  S2 -> S0 [label="b"];
+  S3 -> S2 [label="a"];
+  S3 -> S1 [label="b"];
+}
+
+Starting from the initial state, process this sequence of inputs:
+b, a, b, a, b
+
+What is the final state?
+
+Response:
 <think>
-The user provided the FEN: r1bqk2r/ppp1bppp/2n2n2/3pP3/3P4/2N1BN2/PPP2PPP/R2QKB1R w Kq d6
+Looking at the FSM:
+- Initial state: Start → S0
+- Transitions define how each state responds to inputs 'a' and 'b'
 
-Parsing FEN ranks 8→1:
-8: r1bqk2r → ra8, bc8, qd8, ke8, rh8
-7: ppp1bppp → pawns a7,b7,c7,f7,g7,h7 + be7
-6: 2n2n2 → nc6, nf6
-5: 3pP3 → Black pawn d5, White pawn e5
-4: 3P4 → White pawn d4
-3: 2N1BN2 → Nc3, Be3, Nf3
-2: PPP2PPP → pawns a2,b2,c2,f2,g2,h2
-1: R2QKB1R → Ra1, Qd1, Ke1, Bf1, Rh1
+Processing the sequence: b, a, b, a, b
 
-Pieces: Ra1,Nc3,Be3,Qd1,Ke1,Bf1,Nf3,Rh1 + 6 pawns (White); ra8,bc8,qd8,ke8,be7,nc6,nf6,rh8 + 6 pawns (Black) = 28 total.
+Step 1: Start at S0
+Step 2: Input 'b' → S0 -> S2 [label="b"] → now at S2
+Step 3: Input 'a' → S2 -> S3 [label="a"] → now at S3
+Step 4: Input 'b' → S3 -> S1 [label="b"] → now at S1
+Step 5: Input 'a' → S1 -> S0 [label="a"] → now at S0
+Step 6: Input 'b' → S0 -> S2 [label="b"] → now at S2
 
-Turn: w = White. White king: e1.
-Castling: Kq = White can castle kingside, Black can castle queenside only.
-En passant: d6 = Black just played d7-d5.
+Final state after processing all inputs: S2
+</think>
+<answer>S2</answer>
 
-Move options: e5f6 (capture knight), e5d6 (en passant capture), e1g1 (kingside castle), or piece moves like c3b5. The pawn capture e5f6 wins a full knight (worth ~3 pawns) versus just winning a pawn with e5d6. This makes e5f6 clearly the best move.
+Your response MUST follow this XML format:
+<think>
+[Your step-by-step reasoning here - trace through each state transition]
 </think>
 <answer>
-<turn>White</turn>
-<piece_count>28</piece_count>
-<white_king>e1</white_king>
-<best_move>e5f6</best_move>
-<centipawn>+441</centipawn>
-<analysis>
-White should capture the knight with e5f6, winning material in this developed middlegame.
-</analysis>
+[Final state name, e.g., S0, S1, S2, etc.]
 </answer>
+
+Be thorough in your thinking process, showing each state transition clearly.
 """
     )
 
@@ -140,58 +153,24 @@ White should capture the knight with e5f6, winning material in this developed mi
 
 
 def make_conv_for_grpo(example, system_prompt):
-    fen = example["fen"]
-    board = chess.Board(fen)
+    """
+    Prepare FSM traversal examples for GRPO training.
 
-    # # Create board visualization
-    # board_str = str(board)
-    # # board_str = "▫" + board_str + "▫"
-    # # board_str = re.sub(r" ", "▫", board_str)
-    # # board_str = re.sub(r"\n", f"▫\n▫", board_str)
-
-    # # Add row labels to board string
-    # rows = board_str.split('\n')
-    # for i, row in enumerate(rows):
-    #     # Chess board labels go from 8 to 1 (top to bottom)
-    #     row_label = str(8 - i)
-    #     rows[i] = row_label + ' ' + row
-    # board_str = '\n'.join(rows)
-
-    # # Add column labels at the top
-    # col_labels = '  a b c d e f g h'
-    # board_str = col_labels + '\n' + board_str
-
-    # can_castle_kingside = board.has_kingside_castling_rights(board.turn)
-    # can_castle_queenside = board.has_queenside_castling_rights(board.turn)
-    # ep_square = board.ep_square
-
-    # # Add additional information to the board string
-    # board_str += f"\nTo move: {'white' if board.turn else 'black'}"
-    # board_str += f"\nCan castle kingside: {'yes' if can_castle_kingside else 'no'}"
-    # board_str += f"\nCan castle queenside: {'yes' if can_castle_queenside else 'no'}"
-    # board_str += f"\nEn passant square: {chess.square_name(ep_square) if ep_square is not None else 'N/A'}"
-
-    # Extract preprocessing fields using chess board
-    legal_moves = [move.uci() for move in board.legal_moves]
-    turn = "white" if board.turn else "black"  # board.turn is True for white
-    piece_count = len(board.piece_map())  # Pre-calculate piece count
-    white_king = chess.SQUARE_NAMES[board.king(chess.WHITE)]
-
-    best_move = None
-    if example.get("line"):
-        moves = example["line"].split()
-        best_move = moves[0] if moves else None
+    Expected example fields from dataset:
+    - problem: Full FSM problem statement (DOT + sequence + question)
+    - final_state: Ground truth final state
+    - trace: List of states visited (for debugging)
+    - sequence: Input sequence as list
+    """
+    problem = example["problem"]
+    final_state = example["final_state"]
 
     return {
         "prompt": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": fen},
+            {"role": "user", "content": problem},
         ],
-        "legal_moves": legal_moves,
-        "turn": turn,
-        "best_move": best_move,
-        "piece_count": piece_count,
-        "white_king": white_king,
+        "final_state": final_state,
     }
 
 
@@ -234,14 +213,15 @@ def main():
     training_args.run_name = f"{pt_args.name}_{formatted_datetime}"
 
     # Load and preprocess dataset (tokenization is handled by GRPO Trainer)
-    streaming_dataset = (
-        load_dataset(
-            pt_args.dataset_name, pt_args.dataset_subset, split="train", streaming=True
-        )
-        .shuffle(seed=training_args.seed)
-        .take(10000)
-    )
-    train_dataset = Dataset.from_list(list(streaming_dataset))
+    if not os.path.exists(pt_args.dataset_name):
+        logger.error(f"Dataset not found at: {pt_args.dataset_name}")
+        logger.error("Please generate the dataset first using generate.py")
+        sys.exit(1)
+
+    logger.info(f"Loading dataset from local path: {pt_args.dataset_name}")
+    train_dataset = Dataset.load_from_disk(pt_args.dataset_name)
+
+    # Preprocess dataset
     train_dataset = train_dataset.map(
         make_conv_for_grpo, fn_kwargs={"system_prompt": pt_args.system_prompt}
     )
@@ -277,13 +257,7 @@ def main():
         processing_class=tokenizer,
         reward_funcs=[
             format_reward_func,
-            centipawn_int_reward_func,
-            centipawn_accuracy_reward_func,
-            turn_reward_func,
-            best_move_legal_reward_func,
-            best_move_correct_reward_func,
-            piece_count_reward_func,
-            white_king_location_reward_func,
+            final_state_correct_reward_func,
             token_count_reward_func,
         ],
         args=training_args,
